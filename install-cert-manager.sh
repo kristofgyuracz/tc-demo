@@ -5,5 +5,5 @@ helm upgrade \
   --namespace cert-manager \
   --create-namespace \
   --version v1.15.3 \
-  --set installCRDs=true \
+  --set crds.enabled=true \
   --wait
