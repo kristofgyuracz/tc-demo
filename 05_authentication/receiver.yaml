@@ -1,0 +1,105 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: receiver
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: my-selfsigned-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: my-selfsigned-ca # deprecated but still requires in iOS environment
+  secretName: root-secret
+  subject: # needed later for local trust store
+    organizations:
+      - example.com
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: my-ca-issuer
+spec:
+  ca:
+    secretName: root-secret
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: server-certs
+  namespace: receiver
+spec:
+  secretName: server-certs
+  dnsNames:
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+    - ::1
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS8
+    size: 2048
+  issuerRef:
+    name: my-ca-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: receiver-otelcol
+  namespace: receiver
+spec:
+  image: otel/opentelemetry-collector-contrib:0.104.0
+  volumes:
+    - name: certs-volume
+      secret:
+        secretName: server-certs
+  volumeMounts:
+    - mountPath: "/certs"
+      name: certs-volume
+      readOnly: true
+  config:
+    extensions:
+      basicauth:
+        htpasswd: 
+          inline: |
+            user:pass
+    receivers:
+      otlp:
+        protocols:
+          grpc: 
+            auth:
+              authenticator: basicauth
+            tls:
+              cert_file: /certs/tls.crt
+              key_file: /certs/tls.key
+              ca_file: /certs/ca.crt
+    exporters:
+      debug:
+        verbosity: detailed
+    service:
+      telemetry:
+        logs:
+          level: "debug"
+      extensions: [basicauth]
+      pipelines:
+        logs: 
+          processors: []
+          receivers: [otlp]
+          exporters: [debug]
